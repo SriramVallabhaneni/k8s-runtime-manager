@@ -7,6 +7,7 @@ import java.util.List;
 import io.kubernetes.client.openapi.models.V1Deployment;
 import io.kubernetes.client.openapi.models.V1DeploymentList;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/models")
@@ -19,7 +20,7 @@ public class ModelController {
     }
 
     @PostMapping
-    public String deployModel(@RequestBody ModelDeployRequest request) throws Exception {
+    public String deployModel(@Valid @RequestBody ModelDeployRequest request) throws Exception {
         return service.deployModel(request);
     }
 
