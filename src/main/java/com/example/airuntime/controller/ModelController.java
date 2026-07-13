@@ -1,11 +1,11 @@
 package com.example.airuntime.controller;
 
-import com.example.airuntime.model.ModelDeployRequest;
+import com.example.airuntime.dto.ModelDeployRequest;
 import com.example.airuntime.service.KubernetesDeploymentService;
 import com.example.airuntime.dto.ModelResponse;
+import com.example.airuntime.dto.ScaleModelRequest;
 import java.util.List;
-import io.kubernetes.client.openapi.models.V1Deployment;
-import io.kubernetes.client.openapi.models.V1DeploymentList;
+
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 
@@ -37,5 +37,13 @@ public class ModelController {
     @DeleteMapping("/{name}")
     public String deleteModel(@PathVariable String name) throws Exception {
         return service.deleteModel(name);
+    }
+
+    @PatchMapping("/{name}/scale")
+    public ModelResponse scaleModel(
+            @PathVariable String name,
+            @Valid @RequestBody ScaleModelRequest request
+    ) throws Exception {
+        return service.scaleModel(name, request);
     }
 }

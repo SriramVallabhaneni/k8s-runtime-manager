@@ -1,7 +1,8 @@
 package com.example.airuntime.service;
 
-import com.example.airuntime.model.ModelDeployRequest;
+import com.example.airuntime.dto.ModelDeployRequest;
 import com.example.airuntime.dto.ModelResponse;
+import com.example.airuntime.dto.ScaleModelRequest;
 import java.util.List;
 import io.kubernetes.client.custom.IntOrString;
 import io.kubernetes.client.openapi.ApiClient;
@@ -10,7 +11,6 @@ import io.kubernetes.client.openapi.apis.CoreV1Api;
 import io.kubernetes.client.openapi.models.*;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.Map;
 
 @Service
@@ -96,6 +96,20 @@ public class KubernetesDeploymentService {
         String status = availableReplicas >= replicas ? "Running" : "Pending";
 
         return new ModelResponse(name, replicas, availableReplicas, status);
+    }
+
+    public ModelResponse scaleModel(String name, ScaleModelRequest request) throws Exception {
+        V1Deployment deployment = appsApi.readNamespacedDeployment(name, namespace).execute();
+
+        deployment.getSpec().setReplicas(request.getReplicas());
+
+        V1Deployment updatedDeployment = appsApi.replaceNamespacedDeployment(
+                name,
+                namespace,
+                deployment
+        ).execute();
+
+        return toModelResponse(updatedDeployment);
     }
 
     public String deleteModel(String name) throws Exception {

@@ -1,4 +1,4 @@
-package com.example.airuntime.model;
+package com.example.airuntime.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
