@@ -3,6 +3,7 @@ package com.example.airuntime.service;
 import com.example.airuntime.dto.ModelDeployRequest;
 import com.example.airuntime.dto.ModelResponse;
 import com.example.airuntime.dto.ScaleModelRequest;
+import com.example.airuntime.dto.UpdateImageRequest;
 import java.util.List;
 import io.kubernetes.client.custom.IntOrString;
 import io.kubernetes.client.openapi.ApiClient;
@@ -116,5 +117,24 @@ public class KubernetesDeploymentService {
         appsApi.deleteNamespacedDeployment(name, namespace).execute();
         coreApi.deleteNamespacedService(name + "-service", namespace).execute();
         return "Deleted model: " + name;
+    }
+
+    public ModelResponse updateImage(String name, UpdateImageRequest request) throws Exception {
+        V1Deployment deployment = appsApi.readNamespacedDeployment(name, namespace).execute();
+
+        deployment.getSpec()
+                .getTemplate()
+                .getSpec()
+                .getContainers()
+                .get(0)
+                .setImage(request.getImage());
+
+        V1Deployment updatedDeployment = appsApi.replaceNamespacedDeployment(
+                name,
+                namespace,
+                deployment
+        ).execute();
+
+        return toModelResponse(updatedDeployment);
     }
 }

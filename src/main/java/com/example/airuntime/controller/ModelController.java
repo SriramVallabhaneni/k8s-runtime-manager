@@ -4,6 +4,7 @@ import com.example.airuntime.dto.ModelDeployRequest;
 import com.example.airuntime.service.KubernetesDeploymentService;
 import com.example.airuntime.dto.ModelResponse;
 import com.example.airuntime.dto.ScaleModelRequest;
+import com.example.airuntime.dto.UpdateImageRequest;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.*;
@@ -45,5 +46,13 @@ public class ModelController {
             @Valid @RequestBody ScaleModelRequest request
     ) throws Exception {
         return service.scaleModel(name, request);
+    }
+
+    @PatchMapping("/{name}/image")
+    public ModelResponse updateImage(
+            @PathVariable String name,
+            @Valid @RequestBody UpdateImageRequest request
+    ) throws Exception {
+        return service.updateImage(name, request);
     }
 }
