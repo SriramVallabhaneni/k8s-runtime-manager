@@ -5,6 +5,7 @@ import com.example.airuntime.service.KubernetesDeploymentService;
 import com.example.airuntime.dto.ModelResponse;
 import com.example.airuntime.dto.ScaleModelRequest;
 import com.example.airuntime.dto.UpdateImageRequest;
+import io.swagger.v3.oas.annotations.Operation;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +21,10 @@ public class ModelController {
         this.service = service;
     }
 
+    @Operation(
+            summary = "Deploy a new workload",
+            description = "Creates a Kubernetes Deployment and Service."
+    )
     @PostMapping
     public String deployModel(@Valid @RequestBody ModelDeployRequest request) throws Exception {
         return service.deployModel(request);
@@ -35,11 +40,19 @@ public class ModelController {
         return service.getModel(name);
     }
 
+    @Operation(
+            summary = "Delete deployment",
+            description = "Deletes both the Deployment and its Service."
+    )
     @DeleteMapping("/{name}")
     public String deleteModel(@PathVariable String name) throws Exception {
         return service.deleteModel(name);
     }
 
+    @Operation(
+            summary = "Scale a deployment",
+            description = "Updates the replica count of an existing deployment."
+    )
     @PatchMapping("/{name}/scale")
     public ModelResponse scaleModel(
             @PathVariable String name,
@@ -48,6 +61,10 @@ public class ModelController {
         return service.scaleModel(name, request);
     }
 
+    @Operation(
+            summary = "Update container image",
+            description = "Performs a rolling update by changing the deployment image."
+    )
     @PatchMapping("/{name}/image")
     public ModelResponse updateImage(
             @PathVariable String name,
@@ -56,6 +73,10 @@ public class ModelController {
         return service.updateImage(name, request);
     }
 
+    @Operation(
+            summary = "Restart deployment",
+            description = "Triggers a rollout restart of the deployment."
+    )
    @PostMapping("/{name}/restart")
     public ModelResponse restartModel(@PathVariable String name) throws Exception {
         return service.restartModel(name);

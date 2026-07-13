@@ -5,11 +5,13 @@ metadata:
   name: runtime-manager
 
 spec:
+
+  type: NodePort
+
   selector:
     app: runtime-manager
 
   ports:
     - port: 8080
       targetPort: 8080
-
-  type: NodePort
+      nodePort: 30080
