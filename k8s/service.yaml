@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: runtime-manager
+
+spec:
+  selector:
+    app: runtime-manager
+
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+  type: NodePort

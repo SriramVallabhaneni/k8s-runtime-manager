@@ -10,7 +10,14 @@ public class KubernetesConfig {
 
     @Bean
     public ApiClient apiClient() throws Exception {
-        ApiClient client = Config.defaultClient();
+        ApiClient client;
+
+        if (System.getenv("KUBERNETES_SERVICE_HOST") != null) {
+            client = Config.fromCluster();
+        } else {
+            client = Config.defaultClient();
+        }
+
         Configuration.setDefaultApiClient(client);
         return client;
     }
