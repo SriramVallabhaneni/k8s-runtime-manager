@@ -53,6 +53,36 @@ public class KubernetesDeploymentService {
                         .template(new V1PodTemplateSpec()
                                 .metadata(new V1ObjectMeta().labels(labels))
                                 .spec(new V1PodSpec()
+                                        .initContainers(List.of(
+                                                new V1Container()
+                                                        .name("model-puller")
+                                                        .image(aiModel.image())
+                                                        .command(List.of("/bin/sh", "-c"))
+                                                        .args(List.of("""
+                                ollama serve &
+                                server_pid=$!
+
+                                until ollama list >/dev/null 2>&1; do
+                                  echo "Waiting for temporary Ollama server..."
+                                  sleep 2
+                                done
+
+                                echo "Pulling model: %s"
+                                ollama pull %s
+
+                                echo "Model pull completed."
+                                kill $server_pid
+                                wait $server_pid || true
+                                """.formatted(
+                                                                aiModel.ollamaModel(),
+                                                                aiModel.ollamaModel()
+                                                        )))
+                                                        .volumeMounts(List.of(
+                                                                new V1VolumeMount()
+                                                                        .name("ollama-models")
+                                                                        .mountPath("/root/.ollama")
+                                                        ))
+                                        ))
                                         .containers(List.of(
                                                 new V1Container()
                                                         .name(deploymentName)
@@ -61,6 +91,16 @@ public class KubernetesDeploymentService {
                                                                 new V1ContainerPort()
                                                                         .containerPort(aiModel.port())
                                                         ))
+                                                        .volumeMounts(List.of(
+                                                                new V1VolumeMount()
+                                                                        .name("ollama-models")
+                                                                        .mountPath("/root/.ollama")
+                                                        ))
+                                        ))
+                                        .volumes(List.of(
+                                                new V1Volume()
+                                                        .name("ollama-models")
+                                                        .emptyDir(new V1EmptyDirVolumeSource())
                                         )))));
 
         appsApi.createNamespacedDeployment(namespace, deployment).execute();

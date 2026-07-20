@@ -8,8 +8,18 @@ import java.util.Map;
 public class AiModelRegistry {
 
     private final Map<String, AiModel> models = Map.of(
-            "tinyllama", new AiModel("ollama/ollama", 11434),
-            "llama3", new AiModel("ollama/ollama", 11434)
+            "tinyllama",
+            new AiModel(
+                    "ollama/ollama",
+                    11434,
+                    "tinyllama"
+            ),
+            "llama3",
+            new AiModel(
+                    "ollama/ollama",
+                    11434,
+                    "llama3"
+            )
     );
 
     public AiModel get(String modelName) {
