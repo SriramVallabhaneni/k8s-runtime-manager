@@ -108,6 +108,36 @@ public class KubernetesDeploymentService {
                                                                 new V1ContainerPort()
                                                                         .containerPort(aiModel.port())
                                                         ))
+                                                        .startupProbe(
+                                                                new V1Probe()
+                                                                        .httpGet(
+                                                                                new V1HTTPGetAction()
+                                                                                        .path("/api/tags")
+                                                                                        .port(new IntOrString(aiModel.port()))
+                                                                        )
+                                                                        .periodSeconds(2)
+                                                                        .failureThreshold(30)
+                                                        )
+                                                        .readinessProbe(
+                                                                new V1Probe()
+                                                                        .httpGet(
+                                                                                new V1HTTPGetAction()
+                                                                                        .path("/api/tags")
+                                                                                        .port(new IntOrString(aiModel.port()))
+                                                                        )
+                                                                        .periodSeconds(5)
+                                                                        .failureThreshold(3)
+                                                        )
+                                                        .livenessProbe(
+                                                                new V1Probe()
+                                                                        .httpGet(
+                                                                                new V1HTTPGetAction()
+                                                                                        .path("/api/tags")
+                                                                                        .port(new IntOrString(aiModel.port()))
+                                                                        )
+                                                                        .periodSeconds(10)
+                                                                        .failureThreshold(3)
+                                                        )
                                                         .volumeMounts(List.of(
                                                                 new V1VolumeMount()
                                                                         .name("ollama-models")
