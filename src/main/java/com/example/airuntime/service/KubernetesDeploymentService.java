@@ -6,6 +6,7 @@ import com.example.airuntime.dto.ScaleModelRequest;
 import com.example.airuntime.dto.UpdateImageRequest;
 import com.example.airuntime.model.AiModel;
 import com.example.airuntime.model.AiModelRegistry;
+import io.kubernetes.client.custom.Quantity;
 import java.util.List;
 import io.kubernetes.client.custom.IntOrString;
 import io.kubernetes.client.openapi.ApiClient;
@@ -40,6 +41,22 @@ public class KubernetesDeploymentService {
 
         String deploymentName = request.getDeploymentName();
         Map<String, String> labels = Map.of("app", deploymentName);
+
+        String claimName = deploymentName + "-models";
+
+        V1PersistentVolumeClaim claim = new V1PersistentVolumeClaim()
+                .apiVersion("v1")
+                .kind("PersistentVolumeClaim")
+                .metadata(new V1ObjectMeta().name(claimName))
+                .spec(new V1PersistentVolumeClaimSpec()
+                        .accessModes(List.of("ReadWriteOnce"))
+                        .resources(new V1VolumeResourceRequirements()
+                                .requests(Map.of(
+                                        "storage",
+                                        Quantity.fromString("5Gi")
+                                ))));
+
+        coreApi.createNamespacedPersistentVolumeClaim(namespace, claim).execute();
 
         V1Deployment deployment = new V1Deployment()
                 .apiVersion("apps/v1")
@@ -100,7 +117,10 @@ public class KubernetesDeploymentService {
                                         .volumes(List.of(
                                                 new V1Volume()
                                                         .name("ollama-models")
-                                                        .emptyDir(new V1EmptyDirVolumeSource())
+                                                        .persistentVolumeClaim(
+                                                                new V1PersistentVolumeClaimVolumeSource()
+                                                                        .claimName(claimName)
+                                                        )
                                         )))));
 
         appsApi.createNamespacedDeployment(namespace, deployment).execute();
@@ -168,6 +188,10 @@ public class KubernetesDeploymentService {
     public String deleteModel(String name) throws Exception {
         appsApi.deleteNamespacedDeployment(name, namespace).execute();
         coreApi.deleteNamespacedService(name + "-service", namespace).execute();
+        coreApi.deleteNamespacedPersistentVolumeClaim(
+                name + "-models",
+                namespace
+        ).execute();
         return "Deleted model: " + name;
     }
 
