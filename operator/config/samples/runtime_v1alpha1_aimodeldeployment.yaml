@@ -1,0 +1,8 @@
+apiVersion: runtime.airuntime.dev/v1alpha1
+kind: AIModelDeployment
+metadata:
+  name: tinyllama-runtime
+spec:
+  model: tinyllama
+  replicas: 1
+  storageSize: 5Gi
