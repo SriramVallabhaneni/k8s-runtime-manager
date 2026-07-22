@@ -19,7 +19,7 @@ target/
 *.test
 *.out
 go.work
-bin/*
+operator/bin/
 Dockerfile.cross
 
 # Keep vendored generated files
