@@ -1,27 +1,29 @@
 package com.example.airuntime.service;
 
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.stereotype.Service;
+
 import com.example.airuntime.dto.DeployModelRequest;
 import com.example.airuntime.dto.ModelResponse;
 import com.example.airuntime.dto.ScaleModelRequest;
 import com.example.airuntime.dto.UpdateImageRequest;
 import com.example.airuntime.model.AiModel;
 import com.example.airuntime.model.AiModelRegistry;
-import io.kubernetes.client.custom.Quantity;
-import java.util.List;
-import io.kubernetes.client.custom.IntOrString;
+
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.apis.AppsV1Api;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
-import io.kubernetes.client.openapi.models.*;
-import org.springframework.stereotype.Service;
-
-import java.util.Map;
+import io.kubernetes.client.openapi.apis.CustomObjectsApi;
+import io.kubernetes.client.openapi.models.V1Deployment;
 
 @Service
 public class KubernetesDeploymentService {
 
     private final AppsV1Api appsApi;
     private final CoreV1Api coreApi;
+    private final CustomObjectsApi customObjectsApi;
     private final String namespace = "default";
 
     private final AiModelRegistry aiModelRegistry;
@@ -30,6 +32,7 @@ public class KubernetesDeploymentService {
         this.appsApi = new AppsV1Api(apiClient);
         this.coreApi = new CoreV1Api(apiClient);
         this.aiModelRegistry = aiModelRegistry;
+        this.customObjectsApi = new CustomObjectsApi(apiClient);
     }
 
     public String deployModel(DeployModelRequest request) throws Exception {
@@ -39,137 +42,28 @@ public class KubernetesDeploymentService {
             throw new IllegalArgumentException("Unsupported model: " + request.getModel());
         }
 
-        String deploymentName = request.getDeploymentName();
-        Map<String, String> labels = Map.of("app", deploymentName, "airuntime.dev/managed", "true");
+        Map<String, Object> resource = Map.of(
+                "apiVersion", "runtime.airuntime.dev/v1alpha1",
+                "kind", "AIModelDeployment",
+                "metadata", Map.of(
+                "name", request.getDeploymentName()
+                ),
+                "spec", Map.of(
+                        "model", request.getModel(),
+                        "replicas", request.getReplicas(),
+                        "storageSize", "5Gi"
+                )
+        );
 
-        String claimName = deploymentName + "-models";
+        customObjectsApi.createNamespacedCustomObject(
+                "runtime.airuntime.dev",
+                "v1alpha1",
+                namespace,
+                "aimodeldeployments",
+                resource
+        ).execute();
 
-        V1PersistentVolumeClaim claim = new V1PersistentVolumeClaim()
-                .apiVersion("v1")
-                .kind("PersistentVolumeClaim")
-                .metadata(new V1ObjectMeta().name(claimName))
-                .spec(new V1PersistentVolumeClaimSpec()
-                        .accessModes(List.of("ReadWriteOnce"))
-                        .resources(new V1VolumeResourceRequirements()
-                                .requests(Map.of(
-                                        "storage",
-                                        Quantity.fromString("5Gi")
-                                ))));
-
-        coreApi.createNamespacedPersistentVolumeClaim(namespace, claim).execute();
-
-        V1Deployment deployment = new V1Deployment()
-                .apiVersion("apps/v1")
-                .kind("Deployment")
-                .metadata(new V1ObjectMeta()
-                        .name(deploymentName)
-                        .labels(labels))
-                .spec(new V1DeploymentSpec()
-                        .replicas(request.getReplicas())
-                        .selector(new V1LabelSelector().matchLabels(labels))
-                        .template(new V1PodTemplateSpec()
-                                .metadata(new V1ObjectMeta().labels(labels))
-                                .spec(new V1PodSpec()
-                                        .initContainers(List.of(
-                                                new V1Container()
-                                                        .name("model-puller")
-                                                        .image(aiModel.image())
-                                                        .command(List.of("/bin/sh", "-c"))
-                                                        .args(List.of("""
-                                ollama serve &
-                                server_pid=$!
-
-                                until ollama list >/dev/null 2>&1; do
-                                  echo "Waiting for temporary Ollama server..."
-                                  sleep 2
-                                done
-
-                                echo "Pulling model: %s"
-                                ollama pull %s
-
-                                echo "Model pull completed."
-                                kill $server_pid
-                                wait $server_pid || true
-                                """.formatted(
-                                                                aiModel.ollamaModel(),
-                                                                aiModel.ollamaModel()
-                                                        )))
-                                                        .volumeMounts(List.of(
-                                                                new V1VolumeMount()
-                                                                        .name("ollama-models")
-                                                                        .mountPath("/root/.ollama")
-                                                        ))
-                                        ))
-                                        .containers(List.of(
-                                                new V1Container()
-                                                        .name(deploymentName)
-                                                        .image(aiModel.image())
-                                                        .ports(List.of(
-                                                                new V1ContainerPort()
-                                                                        .containerPort(aiModel.port())
-                                                        ))
-                                                        .startupProbe(
-                                                                new V1Probe()
-                                                                        .httpGet(
-                                                                                new V1HTTPGetAction()
-                                                                                        .path("/api/tags")
-                                                                                        .port(new IntOrString(aiModel.port()))
-                                                                        )
-                                                                        .periodSeconds(2)
-                                                                        .failureThreshold(30)
-                                                        )
-                                                        .readinessProbe(
-                                                                new V1Probe()
-                                                                        .httpGet(
-                                                                                new V1HTTPGetAction()
-                                                                                        .path("/api/tags")
-                                                                                        .port(new IntOrString(aiModel.port()))
-                                                                        )
-                                                                        .periodSeconds(5)
-                                                                        .failureThreshold(3)
-                                                        )
-                                                        .livenessProbe(
-                                                                new V1Probe()
-                                                                        .httpGet(
-                                                                                new V1HTTPGetAction()
-                                                                                        .path("/api/tags")
-                                                                                        .port(new IntOrString(aiModel.port()))
-                                                                        )
-                                                                        .periodSeconds(10)
-                                                                        .failureThreshold(3)
-                                                        )
-                                                        .volumeMounts(List.of(
-                                                                new V1VolumeMount()
-                                                                        .name("ollama-models")
-                                                                        .mountPath("/root/.ollama")
-                                                        ))
-                                        ))
-                                        .volumes(List.of(
-                                                new V1Volume()
-                                                        .name("ollama-models")
-                                                        .persistentVolumeClaim(
-                                                                new V1PersistentVolumeClaimVolumeSource()
-                                                                        .claimName(claimName)
-                                                        )
-                                        )))));
-
-        appsApi.createNamespacedDeployment(namespace, deployment).execute();
-
-        V1Service service = new V1Service()
-                .apiVersion("v1")
-                .kind("Service")
-                .metadata(new V1ObjectMeta().name(deploymentName + "-service"))
-                .spec(new V1ServiceSpec()
-                        .selector(labels)
-                        .ports(List.of(
-                                new V1ServicePort()
-                                        .port(aiModel.port())
-                                        .targetPort(new IntOrString(aiModel.port()))
-                        )));
-
-        coreApi.createNamespacedService(namespace, service).execute();
-
-        return "Deployed AI model: " + request.getModel() + " as " + deploymentName;
+        return "Deployed AI model: " + request.getDeploymentName();
     }
 
     public List<ModelResponse> listModels() throws Exception {
