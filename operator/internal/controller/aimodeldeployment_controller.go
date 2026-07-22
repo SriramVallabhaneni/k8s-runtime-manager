@@ -22,6 +22,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,6 +44,7 @@ type AIModelDeploymentReconciler struct {
 // +kubebuilder:rbac:groups=runtime.airuntime.dev,resources=aimodeldeployments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=runtime.airuntime.dev,resources=aimodeldeployments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -59,14 +61,10 @@ func (r *AIModelDeploymentReconciler) Reconcile(
 ) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	// Fetch the AIModelDeployment that triggered this reconciliation.
 	aiModelDeployment := &runtimev1alpha1.AIModelDeployment{}
 
-	err := r.Get(ctx, req.NamespacedName, aiModelDeployment)
-	if err != nil {
+	if err := r.Get(ctx, req.NamespacedName, aiModelDeployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			// The resource was deleted before this reconciliation ran.
-			// There is nothing left for the controller to do.
 			return ctrl.Result{}, nil
 		}
 
@@ -74,11 +72,95 @@ func (r *AIModelDeploymentReconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 
-	// The child Deployment uses the same name and namespace as the
-	// AIModelDeployment custom resource.
+	// Reconcile the PVC first because the runtime Deployment will
+	// eventually mount it.
+	if err := r.reconcilePVC(ctx, aiModelDeployment); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Reconcile the child Deployment.
+	if err := r.reconcileDeployment(ctx, aiModelDeployment); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *AIModelDeploymentReconciler) reconcilePVC(
+	ctx context.Context,
+	aiModelDeployment *runtimev1alpha1.AIModelDeployment,
+) error {
+	logger := logf.FromContext(ctx)
+
+	pvcName := aiModelDeployment.Name + "-models"
+
+	existingPVC := &corev1.PersistentVolumeClaim{}
+
+	err := r.Get(
+		ctx,
+		types.NamespacedName{
+			Name:      pvcName,
+			Namespace: aiModelDeployment.Namespace,
+		},
+		existingPVC,
+	)
+
+	if err == nil {
+		logger.Info(
+			"child PersistentVolumeClaim already exists",
+			"persistentVolumeClaim",
+			existingPVC.Name,
+		)
+
+		return nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		logger.Error(err, "unable to fetch child PersistentVolumeClaim")
+		return err
+	}
+
+	pvc, err := r.pvcForAIModel(aiModelDeployment)
+	if err != nil {
+		logger.Error(err, "unable to build child PersistentVolumeClaim")
+		return err
+	}
+
+	if err := controllerutil.SetControllerReference(
+		aiModelDeployment,
+		pvc,
+		r.Scheme,
+	); err != nil {
+		logger.Error(
+			err,
+			"unable to set owner reference on PersistentVolumeClaim",
+		)
+		return err
+	}
+
+	logger.Info(
+		"creating child PersistentVolumeClaim",
+		"persistentVolumeClaim",
+		pvc.Name,
+	)
+
+	if err := r.Create(ctx, pvc); err != nil {
+		logger.Error(err, "unable to create child PersistentVolumeClaim")
+		return err
+	}
+
+	return nil
+}
+
+func (r *AIModelDeploymentReconciler) reconcileDeployment(
+	ctx context.Context,
+	aiModelDeployment *runtimev1alpha1.AIModelDeployment,
+) error {
+	logger := logf.FromContext(ctx)
+
 	deployment := &appsv1.Deployment{}
 
-	err = r.Get(
+	err := r.Get(
 		ctx,
 		types.NamespacedName{
 			Name:      aiModelDeployment.Name,
@@ -88,40 +170,29 @@ func (r *AIModelDeploymentReconciler) Reconcile(
 	)
 
 	if err == nil {
-		// The Deployment already exists.
-		// For this first milestone, no update is necessary.
 		logger.Info(
 			"child Deployment already exists",
 			"deployment",
 			deployment.Name,
 		)
 
-		return ctrl.Result{}, nil
+		return nil
 	}
 
 	if !apierrors.IsNotFound(err) {
 		logger.Error(err, "unable to fetch child Deployment")
-		return ctrl.Result{}, err
+		return err
 	}
 
-	// The Deployment does not exist, so build the desired child resource.
 	deployment = r.deploymentForAIModel(aiModelDeployment)
 
-	// Establish the ownership relationship:
-	//
-	// AIModelDeployment
-	//        owns
-	// Kubernetes Deployment
-	//
-	// This also allows Kubernetes garbage collection to delete the child
-	// Deployment when the custom resource is deleted.
 	if err := controllerutil.SetControllerReference(
 		aiModelDeployment,
 		deployment,
 		r.Scheme,
 	); err != nil {
 		logger.Error(err, "unable to set owner reference on Deployment")
-		return ctrl.Result{}, err
+		return err
 	}
 
 	logger.Info(
@@ -132,10 +203,48 @@ func (r *AIModelDeploymentReconciler) Reconcile(
 
 	if err := r.Create(ctx, deployment); err != nil {
 		logger.Error(err, "unable to create child Deployment")
-		return ctrl.Result{}, err
+		return err
 	}
 
-	return ctrl.Result{}, nil
+	return nil
+}
+
+func (r *AIModelDeploymentReconciler) pvcForAIModel(
+	aiModelDeployment *runtimev1alpha1.AIModelDeployment,
+) (*corev1.PersistentVolumeClaim, error) {
+	storageSize := aiModelDeployment.Spec.StorageSize
+	if storageSize == "" {
+		storageSize = "5Gi"
+	}
+
+	storageQuantity, err := resource.ParseQuantity(storageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	labels := map[string]string{
+		"app.kubernetes.io/name":       "ai-model-runtime",
+		"app.kubernetes.io/instance":   aiModelDeployment.Name,
+		"app.kubernetes.io/managed-by": "ai-runtime-operator",
+	}
+
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      aiModelDeployment.Name + "-models",
+			Namespace: aiModelDeployment.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: storageQuantity,
+				},
+			},
+		},
+	}, nil
 }
 
 func (r *AIModelDeploymentReconciler) deploymentForAIModel(
@@ -190,6 +299,7 @@ func (r *AIModelDeploymentReconciler) deploymentForAIModel(
 func (r *AIModelDeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&runtimev1alpha1.AIModelDeployment{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&appsv1.Deployment{}).
 		Named("aimodeldeployment").
 		Complete(r)
